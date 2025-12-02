@@ -3,38 +3,55 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Fishing Leaders</title>
+<title>Fishing Jamboree Leaderboard</title>
 
 <style>
+    :root {
+        --primary-dark:   #004a7c;
+        --primary-medium: #006ba6;
+        --primary-light:  #69c8f2;
+        --bg-light:       #f2f4f5;
+        --white:          #ffffff;
+        --border-gray:    #d5d8da;
+        --text-gray:      #525252;
+    }
+
     body {
         font-family: Arial, sans-serif;
         margin: 0;
         padding: 20px;
-        background: #f5f5f5;
+        background: var(--bg-light);
+        color: var(--text-gray);
     }
 
     h1 {
         margin-top: 0;
+        color: var(--primary-dark);
+        font-weight: 700;
+        font-size: 28px;
+        text-align: center;
     }
 
     .section {
-        background: white;
-        margin-bottom: 20px;
-        border-radius: 8px;
+        background: var(--white);
+        margin: 0 auto 24px auto;
+        border-radius: 10px;
         overflow: hidden;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        max-width: 800px;
+        box-shadow: 0 3px 6px rgba(0,0,0,0.12);
     }
 
     .section-header {
-        padding: 16px;
-        background: #2e6ac7;
-        color: white;
+        padding: 18px 20px;
+        background: var(--primary-dark);
+        color: var(--white);
         cursor: pointer;
         font-size: 20px;
-        font-weight: bold;
         display: flex;
         justify-content: space-between;
+        font-weight: 600;
         align-items: center;
+        letter-spacing: 0.5px;
     }
 
     .section-header span.toggle {
@@ -42,183 +59,45 @@
     }
 
     .species-group {
-        border-top: 1px solid #eee;
+        border-top: 1px solid var(--border-gray);
     }
 
     .species-header {
-        background: #efefef;
-        padding: 12px;
+        background: var(--primary-light);
+        padding: 14px 16px;
         cursor: pointer;
         font-size: 18px;
         font-weight: bold;
         display: flex;
         justify-content: space-between;
         align-items: center;
+        color: #003f5e;
+    }
+
+    .species-header:hover {
+        background: var(--primary-medium);
+        color: var(--white);
     }
 
     .fish-list {
         display: none;
-        padding: 10px 20px;
+        padding: 12px 22px;
+        background: var(--bg-light);
     }
 
     .fish-card {
-        background: white;
-        margin-bottom: 12px;
-        padding: 10px;
-        border-radius: 6px;
-        border: 1px solid #ddd;
+        background: var(--white);
+        margin-bottom: 16px;
+        padding: 14px;
+        border-radius: 8px;
+        border: 1px solid var(--border-gray);
         display: flex;
-        gap: 10px;
+        gap: 14px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.08);
     }
 
     .fish-card img {
-        width: 80px;
-        height: 80px;
+        width: 90px;
+        height: 90px;
         object-fit: cover;
-        border-radius: 4px;
-    }
-
-    .fish-info {
-        font-size: 15px;
-        line-height: 1.4;
-    }
-</style>
-</head>
-<body>
-
-<h1>Fishing Jamboree Leaderboard</h1>
-
-<div id="adultSection" class="section">
-    <div class="section-header">
-        <span>Adults</span>
-        <span class="toggle">▼</span>
-    </div>
-    <div id="adultContent"></div>
-</div>
-
-<div id="childSection" class="section">
-    <div class="section-header">
-        <span>Children</span>
-        <span class="toggle">▼</span>
-    </div>
-    <div id="childContent"></div>
-</div>
-
-<script>
-// TODO: change this to your real Wix URL once you know it:
-const API_URL = "https://foxlakeflpo.org/fishing/_functions/fishingdata";
-
-// ---------------------------
-// Utility: group by key
-// ---------------------------
-function groupBy(arr, key) {
-    return arr.reduce((acc, item) => {
-        const k = item[key];
-        if (!acc[k]) acc[k] = [];
-        acc[k].push(item);
-        return acc;
-    }, {});
-}
-
-// ---------------------------
-// Build species section
-// ---------------------------
-function buildSpeciesGroups(data, container) {
-    const speciesGroups = groupBy(data, "species");
-
-    Object.entries(speciesGroups).forEach(([species, entries]) => {
-        // Sort by weight descending
-        entries.sort((a, b) => b.weight - a.weight);
-
-        // Take top 3
-        const top3 = entries.slice(0, 3);
-
-        const groupDiv = document.createElement("div");
-        groupDiv.className = "species-group";
-
-        const header = document.createElement("div");
-        header.className = "species-header";
-        header.innerHTML = `<span>${species}</span><span>▼</span>`;
-        groupDiv.appendChild(header);
-
-        const fishList = document.createElement("div");
-        fishList.className = "fish-list";
-
-        top3.forEach(f => {
-            const card = document.createElement("div");
-            card.className = "fish-card";
-
-            if (f.image) {
-                const img = document.createElement("img");
-                img.src = f.image;
-                card.appendChild(img);
-            }
-
-            const info = document.createElement("div");
-            info.className = "fish-info";
-            const name   = f.name   ?? "";
-            const weight = f.weight ?? "";
-            const length = f.length ?? "";
-
-            info.innerHTML = `
-                <strong>${name}</strong><br>
-                Weight: ${weight} lbs<br>
-                Length: ${length} in
-            `;
-
-            card.appendChild(info);
-            fishList.appendChild(card);
-        });
-
-        groupDiv.appendChild(fishList);
-        container.appendChild(groupDiv);
-
-        header.addEventListener("click", () => {
-            const visible = fishList.style.display === "block";
-            fishList.style.display = visible ? "none" : "block";
-            header.querySelector("span:last-child").textContent = visible ? "▼" : "▲";
-        });
-    });
-}
-
-// ---------------------------
-// Section expand/collapse
-// ---------------------------
-function wireSectionToggle(sectionId) {
-    const section = document.getElementById(sectionId);
-    const header = section.querySelector(".section-header");
-    const content = section.querySelector("div[id$='Content']");
-    const toggleIcon = header.querySelector(".toggle");
-
-    header.addEventListener("click", () => {
-        const visible = content.style.display !== "none";
-        content.style.display = visible ? "none" : "block";
-        toggleIcon.textContent = visible ? "▲" : "▼";
-    });
-}
-
-// ---------------------------
-// Load Data
-// ---------------------------
-wireSectionToggle("adultSection");
-wireSectionToggle("childSection");
-
-fetch(API_URL)
-    .then(res => res.json())
-    .then(json => {
-        const items = json.items || [];
-
-        const adultData = items.filter(x => x.adult === true);
-        const childData = items.filter(x => x.adult === false);
-
-        buildSpeciesGroups(adultData, document.getElementById("adultContent"));
-        buildSpeciesGroups(childData, document.getElementById("childContent"));
-    })
-    .catch(err => {
-        console.error("Error loading fishing data:", err);
-    });
-</script>
-
-</body>
-</html>
-
+        border-radius: 6px;
