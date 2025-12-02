@@ -101,3 +101,154 @@
         height: 90px;
         object-fit: cover;
         border-radius: 6px;
+        border: 1px solid var(--border-gray);
+    }
+
+    .fish-info {
+        font-size: 16px;
+        line-height: 1.45;
+        color: var(--primary-dark);
+    }
+
+    .fish-info strong {
+        color: var(--primary-medium);
+    }
+</style>
+</head>
+<body>
+
+<h1>Fishing Jamboree Leaderboard</h1>
+
+<div id="adultSection" class="section">
+    <div class="section-header">
+        <span>Adults</span>
+        <span class="toggle">▼</span>
+    </div>
+    <div id="adultContent"></div>
+</div>
+
+<div id="childSection" class="section">
+    <div class="section-header">
+        <span>Children</span>
+        <span class="toggle">▼</span>
+    </div>
+    <div id="childContent"></div>
+</div>
+
+<script>
+// Fox Lake FLPO API endpoint
+const API_URL = "https://foxlakeflpo.org/fishing/_functions/fishingdata";
+
+// ---------------------------
+// Utility: group by key
+// ---------------------------
+function groupBy(arr, key) {
+    return arr.reduce((acc, item) => {
+        const k = item[key];
+        if (!acc[k]) acc[k] = [];
+        acc[k].push(item);
+        return acc;
+    }, {});
+}
+
+// ---------------------------
+// Build species section
+// ---------------------------
+function buildSpeciesGroups(data, container) {
+    const speciesGroups = groupBy(data, "species");
+
+    Object.entries(speciesGroups).forEach(([species, entries]) => {
+        // Sort by weight descending
+        entries.sort((a, b) => b.weight - a.weight);
+
+        // Take top 3
+        const top3 = entries.slice(0, 3);
+
+        const groupDiv = document.createElement("div");
+        groupDiv.className = "species-group";
+
+        const header = document.createElement("div");
+        header.className = "species-header";
+        header.innerHTML = `<span>${species}</span><span>▼</span>`;
+        groupDiv.appendChild(header);
+
+        const fishList = document.createElement("div");
+        fishList.className = "fish-list";
+
+        top3.forEach(f => {
+            const card = document.createElement("div");
+            card.className = "fish-card";
+
+            if (f.image) {
+                const img = document.createElement("img");
+                img.src = f.image;
+                card.appendChild(img);
+            }
+
+            const info = document.createElement("div");
+            info.className = "fish-info";
+            const name   = f.name   ?? "";
+            const weight = f.weight ?? "";
+            const length = f.length ?? "";
+
+            info.innerHTML = `
+                <strong>${name}</strong><br>
+                Weight: ${weight} lbs<br>
+                Length: ${length} in
+            `;
+
+            card.appendChild(info);
+            fishList.appendChild(card);
+        });
+
+        groupDiv.appendChild(fishList);
+        container.appendChild(groupDiv);
+
+        header.addEventListener("click", () => {
+            const visible = fishList.style.display === "block";
+            fishList.style.display = visible ? "none" : "block";
+            header.querySelector("span:last-child").textContent = visible ? "▼" : "▲";
+        });
+    });
+}
+
+// ---------------------------
+// Section expand/collapse
+// ---------------------------
+function wireSectionToggle(sectionId) {
+    const section = document.getElementById(sectionId);
+    const header = section.querySelector(".section-header");
+    const content = section.querySelector("div[id$='Content']");
+    const toggleIcon = header.querySelector(".toggle");
+
+    header.addEventListener("click", () => {
+        const visible = content.style.display !== "none";
+        content.style.display = visible ? "none" : "block";
+        toggleIcon.textContent = visible ? "▲" : "▼";
+    });
+}
+
+// ---------------------------
+// Load Data
+// ---------------------------
+wireSectionToggle("adultSection");
+wireSectionToggle("childSection");
+
+fetch(API_URL)
+    .then(res => res.json())
+    .then(json => {
+        const items = json.items || [];
+
+        const adultData = items.filter(x => x.adult === true);
+        const childData = items.filter(x => x.adult === false);
+
+        buildSpeciesGroups(adultData, document.getElementById("adultContent"));
+        buildSpeciesGroups(childData, document.getElementById("childContent"));
+    })
+    .catch(err => {
+        console.error("Error loading fishing data:", err);
+    });
+</script>
+
+</body>
+</html>
