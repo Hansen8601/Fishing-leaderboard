@@ -192,7 +192,7 @@ function buildSpeciesGroups(data, container) {
             const length = f.length ?? "";
 
             info.innerHTML = `
-                <strong>${name}</strong><br>
+                <strong>${name} - ${f.adult || ""}</strong><br>
                 Weight: ${weight} lbs<br>
                 Length: ${length} in
             `;
@@ -265,4 +265,5 @@ fetch(API_URL)
 
 </body>
 </html>
+
 
