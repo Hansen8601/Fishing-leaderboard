@@ -249,7 +249,7 @@ fetch(API_URL)
 
         const childData = items.filter(x => {
             if (typeof x.adult === "string") {
-                return x.adult.trim().toLowerCase() === "child";
+                return x.adult.trim().toLowerCase() === "children";
             }
             return x.adult === false;
         });
@@ -265,5 +265,6 @@ fetch(API_URL)
 
 </body>
 </html>
+
 
 
