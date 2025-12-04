@@ -239,8 +239,20 @@ fetch(API_URL)
     .then(json => {
         const items = json.items || [];
 
-        const adultData = items.filter(x => x.adult === true);
-        const childData = items.filter(x => x.adult === false);
+        // Handle both new text values ("Adult"/"Child") and any old boolean data
+        const adultData = items.filter(x => {
+            if (typeof x.adult === "string") {
+                return x.adult.trim().toLowerCase() === "adult";
+            }
+            return x.adult === true;
+        });
+
+        const childData = items.filter(x => {
+            if (typeof x.adult === "string") {
+                return x.adult.trim().toLowerCase() === "child";
+            }
+            return x.adult === false;
+        });
 
         buildSpeciesGroups(adultData, document.getElementById("adultContent"));
         buildSpeciesGroups(childData, document.getElementById("childContent"));
@@ -250,5 +262,7 @@ fetch(API_URL)
     });
 </script>
 
+
 </body>
 </html>
+
