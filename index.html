@@ -52,6 +52,7 @@
         font-weight: 600;
         align-items: center;
         letter-spacing: 0.5px;
+        user-select: none;
     }
 
     .section-header span.toggle {
@@ -72,6 +73,7 @@
         justify-content: space-between;
         align-items: center;
         color: #003f5e;
+        user-select: none;
     }
 
     .species-header:hover {
@@ -139,6 +141,104 @@
 // Fox Lake FLPO API endpoint
 const API_URL = "https://foxlakeflpo.org/fishing/_functions/fishingdata";
 
+// Polling config
+const POLL_MS = 15000;        // 15 seconds
+const REQUEST_TIMEOUT_MS = 10000;
+
+// ---------------------------
+// UI State (preserved across refreshes)
+// ---------------------------
+// sectionOpen: true means content visible, false means collapsed/hidden
+const uiState = {
+  sectionOpen: {
+    adult: true,
+    child: true
+  },
+  // speciesOpen keyed by `${section}:${speciesKey}` -> boolean
+  speciesOpen: {}
+};
+
+function normalizeKey(s) {
+  return String(s ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/[^\w\s-]/g, "");
+}
+
+// Capture current DOM state before we clear/rebuild
+function captureStateFromDom() {
+  // Sections
+  uiState.sectionOpen.adult = isSectionOpen("adultSection");
+  uiState.sectionOpen.child = isSectionOpen("childSection");
+
+  // Species (Adults + Children)
+  captureSpeciesState("adultContent", "adult");
+  captureSpeciesState("childContent", "child");
+}
+
+function isSectionOpen(sectionId) {
+  const section = document.getElementById(sectionId);
+  const content = section.querySelector("div[id$='Content']");
+  // Visible if display is not 'none'
+  return content.style.display !== "none";
+}
+
+function captureSpeciesState(contentId, sectionKey) {
+  const container = document.getElementById(contentId);
+  if (!container) return;
+
+  const groups = container.querySelectorAll(".species-group");
+  groups.forEach(group => {
+    const speciesKey = group.getAttribute("data-species-key");
+    if (!speciesKey) return;
+
+    const fishList = group.querySelector(".fish-list");
+    const open = fishList && fishList.style.display === "block";
+    uiState.speciesOpen[`${sectionKey}:${speciesKey}`] = open;
+  });
+}
+
+// Apply saved state after rebuild
+function applyStateToDom() {
+  // Sections
+  setSectionOpen("adultSection", uiState.sectionOpen.adult);
+  setSectionOpen("childSection", uiState.sectionOpen.child);
+
+  // Species
+  applySpeciesState("adultContent", "adult");
+  applySpeciesState("childContent", "child");
+}
+
+function setSectionOpen(sectionId, open) {
+  const section = document.getElementById(sectionId);
+  const header = section.querySelector(".section-header");
+  const content = section.querySelector("div[id$='Content']");
+  const toggleIcon = header.querySelector(".toggle");
+
+  content.style.display = open ? "block" : "none";
+  // Expanded => ▲ (collapse), Collapsed => ▼ (expand)
+  toggleIcon.textContent = open ? "▲" : "▼";
+}
+
+function applySpeciesState(contentId, sectionKey) {
+  const container = document.getElementById(contentId);
+  if (!container) return;
+
+  const groups = container.querySelectorAll(".species-group");
+  groups.forEach(group => {
+    const speciesKey = group.getAttribute("data-species-key");
+    if (!speciesKey) return;
+
+    const open = uiState.speciesOpen[`${sectionKey}:${speciesKey}`] === true;
+    const fishList = group.querySelector(".fish-list");
+    const arrow = group.querySelector(".species-header span:last-child");
+
+    if (fishList) fishList.style.display = open ? "block" : "none";
+    if (arrow) arrow.textContent = open ? "▲" : "▼";
+  });
+}
+
 // ---------------------------
 // Utility: group by key
 // ---------------------------
@@ -154,12 +254,17 @@ function groupBy(arr, key) {
 // ---------------------------
 // Build species section
 // ---------------------------
-function buildSpeciesGroups(data, container) {
+function buildSpeciesGroups(data, container, sectionKey) {
     const speciesGroups = groupBy(data, "species");
 
-    Object.entries(speciesGroups).forEach(([species, entries]) => {
+    // stable order: sort by species name
+    const speciesNames = Object.keys(speciesGroups).sort((a, b) => String(a).localeCompare(String(b)));
+
+    speciesNames.forEach((species) => {
+        const entries = speciesGroups[species] || [];
+
         // Sort by weight descending
-        entries.sort((a, b) => b.weight - a.weight);
+        entries.sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0));
 
         // Take top 3
         const top3 = entries.slice(0, 3);
@@ -167,8 +272,14 @@ function buildSpeciesGroups(data, container) {
         const groupDiv = document.createElement("div");
         groupDiv.className = "species-group";
 
+        // data-species-key drives state preservation
+        const speciesKey = normalizeKey(species);
+        groupDiv.setAttribute("data-species-key", speciesKey);
+
         const header = document.createElement("div");
         header.className = "species-header";
+
+        // default arrow; will be overridden by applyStateToDom()
         header.innerHTML = `<span>${species}</span><span>▼</span>`;
         groupDiv.appendChild(header);
 
@@ -206,8 +317,13 @@ function buildSpeciesGroups(data, container) {
 
         header.addEventListener("click", () => {
             const visible = fishList.style.display === "block";
-            fishList.style.display = visible ? "none" : "block";
-            header.querySelector("span:last-child").textContent = visible ? "▼" : "▲";
+            const nextOpen = !visible;
+
+            fishList.style.display = nextOpen ? "block" : "none";
+            header.querySelector("span:last-child").textContent = nextOpen ? "▲" : "▼";
+
+            // persist toggle
+            uiState.speciesOpen[`${sectionKey}:${speciesKey}`] = nextOpen;
         });
     });
 }
@@ -215,31 +331,51 @@ function buildSpeciesGroups(data, container) {
 // ---------------------------
 // Section expand/collapse
 // ---------------------------
-function wireSectionToggle(sectionId) {
+function wireSectionToggle(sectionId, sectionKey) {
     const section = document.getElementById(sectionId);
     const header = section.querySelector(".section-header");
     const content = section.querySelector("div[id$='Content']");
     const toggleIcon = header.querySelector(".toggle");
 
     header.addEventListener("click", () => {
-        const visible = content.style.display !== "none";
-        content.style.display = visible ? "none" : "block";
-        toggleIcon.textContent = visible ? "▲" : "▼";
+        const isVisible = content.style.display !== "none";
+        const nextOpen = !isVisible;
+
+        content.style.display = nextOpen ? "block" : "none";
+        toggleIcon.textContent = nextOpen ? "▲" : "▼";
+
+        uiState.sectionOpen[sectionKey] = nextOpen;
     });
 }
 
 // ---------------------------
-// Load Data
+// Fetch + render (poll-safe)
 // ---------------------------
-wireSectionToggle("adultSection");
-wireSectionToggle("childSection");
+async function loadAndRender() {
+    // Capture current open/closed state from existing DOM
+    captureStateFromDom();
 
-fetch(API_URL)
-    .then(res => res.json())
-    .then(json => {
+    const adultContainer = document.getElementById("adultContent");
+    const childContainer = document.getElementById("childContent");
+
+    // Clear so we don't duplicate content on refresh
+    adultContainer.innerHTML = "";
+    childContainer.innerHTML = "";
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+    try {
+        // Cache-bust + no-store helps prevent stale responses
+        const url = `${API_URL}?t=${Date.now()}`;
+        const res = await fetch(url, { cache: "no-store", signal: controller.signal });
+
+        if (!res.ok) throw new Error(`API error ${res.status}`);
+
+        const json = await res.json();
         const items = json.items || [];
 
-        // Handle both new text values ("Adult"/"Child") and any old boolean data
+        // Handle both text values ("Adult"/"Children") and any old boolean data
         const adultData = items.filter(x => {
             if (typeof x.adult === "string") {
                 return x.adult.trim().toLowerCase() === "adult";
@@ -254,17 +390,51 @@ fetch(API_URL)
             return x.adult === false;
         });
 
-        buildSpeciesGroups(adultData, document.getElementById("adultContent"));
-        buildSpeciesGroups(childData, document.getElementById("childContent"));
-    })
-    .catch(err => {
-        console.error("Error loading fishing data:", err);
-    });
-</script>
+        buildSpeciesGroups(adultData, adultContainer, "adult");
+        buildSpeciesGroups(childData, childContainer, "child");
 
+        // Re-apply saved open/closed state (sections + species)
+        applyStateToDom();
+    } catch (err) {
+        console.error("Error loading fishing data:", err);
+
+        // Keep section state arrows consistent even on error
+        applyStateToDom();
+
+        // Optional: show an error message
+        adultContainer.innerHTML = `<div style="padding:16px;">Unable to load leaderboard right now.</div>`;
+        childContainer.innerHTML = "";
+    } finally {
+        clearTimeout(timeout);
+    }
+}
+
+// ---------------------------
+// Init + polling
+// ---------------------------
+wireSectionToggle("adultSection", "adult");
+wireSectionToggle("childSection", "child");
+
+// Start collapsed or expanded however you want here
+// If you want both collapsed on first load, flip these to false.
+uiState.sectionOpen.adult = true;
+uiState.sectionOpen.child = true;
+setSectionOpen("adultSection", uiState.sectionOpen.adult);
+setSectionOpen("childSection", uiState.sectionOpen.child);
+
+// Initial load
+loadAndRender();
+
+// Poll
+setInterval(loadAndRender, POLL_MS);
+
+// Refresh when user returns to the tab
+document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+        loadAndRender();
+    }
+});
+</script>
 
 </body>
 </html>
-
-
-
