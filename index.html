@@ -115,11 +115,24 @@
     .fish-info strong {
         color: var(--primary-medium);
     }
+
+    .status-banner {
+        max-width: 800px;
+        margin: 0 auto 16px auto;
+        padding: 12px 16px;
+        border-radius: 8px;
+        background: #fff4e5;
+        border: 1px solid #f0c27a;
+        color: #7a4b00;
+        box-sizing: border-box;
+    }
 </style>
 </head>
 <body>
 
 <h1>2026 Fish Tales Fishing Jamboree Leaderboard</h1>
+
+<div id="status" class="status-banner" role="status" hidden></div>
 
 <div id="adultSection" class="section">
     <div class="section-header">
@@ -142,7 +155,7 @@
 const API_URL = "https://foxlakeflpo.org/fishing/_functions/fishingdata";
 
 // Polling config
-const POLL_MS = 300000;        // 30 seconds
+const POLL_MS = 300000;        // 5 minutes
 const REQUEST_TIMEOUT_MS = 10000;
 
 // ---------------------------
@@ -240,59 +253,92 @@ function applySpeciesState(contentId, sectionKey) {
 }
 
 // ---------------------------
-// Utility: group by key
+// Utilities
 // ---------------------------
-function groupBy(arr, key) {
-    return arr.reduce((acc, item) => {
-        const k = item[key];
-        if (!acc[k]) acc[k] = [];
-        acc[k].push(item);
-        return acc;
-    }, {});
+
+// Weights may arrive as numbers or text like "4.2 lbs" / "".
+function toNumber(v) {
+    const n = parseFloat(v);
+    return Number.isFinite(n) ? n : 0;
 }
+
+// Only allow http(s) image URLs (blocks javascript:, data:, etc.)
+function safeImageUrl(v) {
+    if (typeof v !== "string" || !v.trim()) return null;
+    try {
+        const url = new URL(v, window.location.href);
+        return (url.protocol === "http:" || url.protocol === "https:") ? url.href : null;
+    } catch {
+        return null;
+    }
+}
+
+// Group by normalized species so "Walleye" and "walleye " land together.
+// The first spelling seen is used as the display label.
+function groupBySpecies(data) {
+    const groups = new Map();
+    data.forEach(item => {
+        const label = String(item.species ?? "").trim().replace(/\s+/g, " ") || "Other";
+        const key = normalizeKey(label) || "other";
+        if (!groups.has(key)) groups.set(key, { label, entries: [] });
+        groups.get(key).entries.push(item);
+    });
+    return groups;
+}
+
+// Top 3 by weight, plus anyone tied with 3rd place.
+function topEntries(entries) {
+    const sorted = [...entries].sort((a, b) => toNumber(b.weight) - toNumber(a.weight));
+    if (sorted.length <= 3) return sorted;
+    const cutoff = toNumber(sorted[2].weight);
+    if (cutoff <= 0) return sorted.slice(0, 3);
+    return sorted.filter(e => toNumber(e.weight) >= cutoff);
+}
+
+const SECTION_LABELS = { adult: "Adult", child: "Child" };
 
 // ---------------------------
 // Build species section
 // ---------------------------
 function buildSpeciesGroups(data, container, sectionKey) {
-    const speciesGroups = groupBy(data, "species");
+    const speciesGroups = groupBySpecies(data);
 
     // stable order: sort by species name
-    const speciesNames = Object.keys(speciesGroups).sort((a, b) => String(a).localeCompare(String(b)));
+    const groups = [...speciesGroups.entries()]
+        .sort(([, a], [, b]) => a.label.localeCompare(b.label));
 
-    speciesNames.forEach((species) => {
-        const entries = speciesGroups[species] || [];
-
-        // Sort by weight descending
-        entries.sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0));
-
-        // Take top 3
-        const top3 = entries.slice(0, 3);
+    groups.forEach(([speciesKey, { label, entries }]) => {
+        const top = topEntries(entries);
 
         const groupDiv = document.createElement("div");
         groupDiv.className = "species-group";
 
         // data-species-key drives state preservation
-        const speciesKey = normalizeKey(species);
         groupDiv.setAttribute("data-species-key", speciesKey);
 
         const header = document.createElement("div");
         header.className = "species-header";
 
         // default arrow; will be overridden by applyStateToDom()
-        header.innerHTML = `<span>${species}</span><span>▼</span>`;
+        const labelSpan = document.createElement("span");
+        labelSpan.textContent = label;
+        const arrowSpan = document.createElement("span");
+        arrowSpan.textContent = "▼";
+        header.append(labelSpan, arrowSpan);
         groupDiv.appendChild(header);
 
         const fishList = document.createElement("div");
         fishList.className = "fish-list";
 
-        top3.forEach(f => {
+        top.forEach(f => {
             const card = document.createElement("div");
             card.className = "fish-card";
 
-            if (f.image) {
+            const imgUrl = safeImageUrl(f.image);
+            if (imgUrl) {
                 const img = document.createElement("img");
-                img.src = f.image;
+                img.src = imgUrl;
+                img.alt = "";
                 card.appendChild(img);
             }
 
@@ -302,11 +348,15 @@ function buildSpeciesGroups(data, container, sectionKey) {
             const weight = f.weight ?? "";
             const length = f.length ?? "";
 
-            info.innerHTML = `
-                <strong>${name} - ${f.adult || ""}</strong><br>
-                Weight: ${weight} lbs<br>
-                Length: ${length} in
-            `;
+            const strong = document.createElement("strong");
+            strong.textContent = `${name} - ${SECTION_LABELS[sectionKey]}`;
+            info.append(
+                strong,
+                document.createElement("br"),
+                `Weight: ${weight} lbs`,
+                document.createElement("br"),
+                `Length: ${length} in`
+            );
 
             card.appendChild(info);
             fishList.appendChild(card);
@@ -351,16 +401,36 @@ function wireSectionToggle(sectionId, sectionKey) {
 // ---------------------------
 // Fetch + render (poll-safe)
 // ---------------------------
+// Handle text values ("Adult", "Adults", "Children", "Child", "Kids"...)
+// and any old boolean data. Returns "adult", "child", or null.
+function categorize(x) {
+    if (typeof x.adult === "string") {
+        const v = x.adult.trim().toLowerCase();
+        if (v.startsWith("adult")) return "adult";
+        if (["child", "kid", "youth", "junior"].some(p => v.startsWith(p))) return "child";
+        return null;
+    }
+    if (x.adult === true) return "adult";
+    if (x.adult === false) return "child";
+    return null;
+}
+
+function showStatus(message) {
+    const el = document.getElementById("status");
+    el.textContent = message;
+    el.hidden = !message;
+}
+
+// Each call gets an id; only the most recent call is allowed to render,
+// so overlapping refreshes (poll + tab focus) can't double up content.
+let latestRequestId = 0;
+let hasRendered = false;
+
 async function loadAndRender() {
-    // Capture current open/closed state from existing DOM
-    captureStateFromDom();
+    const requestId = ++latestRequestId;
 
     const adultContainer = document.getElementById("adultContent");
     const childContainer = document.getElementById("childContent");
-
-    // Clear so we don't duplicate content on refresh
-    adultContainer.innerHTML = "";
-    childContainer.innerHTML = "";
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -375,35 +445,42 @@ async function loadAndRender() {
         const json = await res.json();
         const items = json.items || [];
 
-        // Handle both text values ("Adult"/"Children") and any old boolean data
-        const adultData = items.filter(x => {
-            if (typeof x.adult === "string") {
-                return x.adult.trim().toLowerCase() === "adult";
-            }
-            return x.adult === true;
+        // A newer refresh started while we were waiting; let it render.
+        if (requestId !== latestRequestId) return;
+
+        const adultData = [];
+        const childData = [];
+        items.forEach(x => {
+            const category = categorize(x);
+            if (category === "adult") adultData.push(x);
+            else if (category === "child") childData.push(x);
+            else console.warn("Leaderboard item with unrecognized category skipped:", x);
         });
 
-        const childData = items.filter(x => {
-            if (typeof x.adult === "string") {
-                return x.adult.trim().toLowerCase() === "children";
-            }
-            return x.adult === false;
-        });
+        // Build off-screen, then swap in only after a successful fetch
+        const adultFrag = document.createDocumentFragment();
+        const childFrag = document.createDocumentFragment();
+        buildSpeciesGroups(adultData, adultFrag, "adult");
+        buildSpeciesGroups(childData, childFrag, "child");
 
-        buildSpeciesGroups(adultData, adultContainer, "adult");
-        buildSpeciesGroups(childData, childContainer, "child");
+        // Capture current open/closed state right before replacing the DOM
+        captureStateFromDom();
+        adultContainer.replaceChildren(adultFrag);
+        childContainer.replaceChildren(childFrag);
 
         // Re-apply saved open/closed state (sections + species)
         applyStateToDom();
+
+        hasRendered = true;
+        showStatus("");
     } catch (err) {
+        if (requestId !== latestRequestId) return;
         console.error("Error loading fishing data:", err);
 
-        // Keep section state arrows consistent even on error
-        applyStateToDom();
-
-        // Optional: show an error message
-        adultContainer.innerHTML = `<div style="padding:16px;">Unable to load leaderboard right now.</div>`;
-        childContainer.innerHTML = "";
+        // Keep the last good results on screen; just show a banner.
+        showStatus(hasRendered
+            ? "Couldn't refresh the leaderboard. Showing the last results."
+            : "Unable to load leaderboard right now.");
     } finally {
         clearTimeout(timeout);
     }
